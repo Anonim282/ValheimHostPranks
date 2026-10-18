@@ -12,7 +12,7 @@ namespace ValheimHostPranks
     {
         public const string ModGUID = "com.anonim.valheimhostpranks";
         public const string ModName = "Valheim Host Pranks";
-        public const string ModVersion = "1.0.6";
+        public const string ModVersion = "1.0.7";
 
         public static HostPranksPlugin Instance { get; private set; } = null!;
 
@@ -108,8 +108,7 @@ namespace ValheimHostPranks
 
                     GUILayout.BeginHorizontal();
 
-                    // Кнопка: Кинематографичное явление Одина
-                    if (GUILayout.Button("⚡ Явление Одина (Вороны + Молния)", GUILayout.Height(28)))
+                    if (GUILayout.Button("⚡ Явление Одина (Стая 13с + Молния)", GUILayout.Height(28)))
                     {
                         TriggerOdinCinemaPrank(player);
                     }
@@ -133,9 +132,6 @@ namespace ValheimHostPranks
             Logger.LogInfo(message);
         }
 
-        // ==========================================
-        // КИНЕМАТОГРАФИЧНОЕ ЯВЛЕНИЕ ОДИНА
-        // ==========================================
         private void TriggerOdinCinemaPrank(Player target)
         {
             if (target == null) return;
@@ -160,12 +156,11 @@ namespace ValheimHostPranks
                 if (groundHeight > 0f) summonPos.y = groundHeight;
             }
 
-            // Запускаем режиссерский контроллер
             GameObject directorObj = new GameObject("OdinCinemaDirector");
             OdinCinemaDirector director = directorObj.AddComponent<OdinCinemaDirector>();
             director.StartRitual(target, summonPos, odinPrefab);
 
-            SetStatus($"🦅 Стая черных воронов кружит вокруг '{target.GetPlayerName()}'...");
+            SetStatus($"🦅 Стая из 30 черных воронов окружает '{target.GetPlayerName()}' (13 сек)...");
         }
 
         public static GameObject? FindOdinPrefab()
@@ -263,7 +258,7 @@ namespace ValheimHostPranks
     }
 
     // =========================================================================
-    // РЕЖИССЕРСКИЙ КОНТРОЛЛЕР: ХАОТИЧНАЯ СТАЯ ВОРОН -> СХОЖДЕНИЕ В ТОЧКУ -> ОДИН
+    // РЕЖИССЕРСКИЙ КОНТРОЛЛЕР: СТАЯ (13 СЕК) -> СХОЖДЕНИЕ В ТОЧКУ -> ОДИН
     // =========================================================================
     public class OdinCinemaDirector : MonoBehaviour
     {
@@ -272,7 +267,9 @@ namespace ValheimHostPranks
         private GameObject _odinPrefab = null!;
         private readonly List<RavenActor> _ravens = new List<RavenActor>();
         private float _timer = 0f;
-        private int _stage = 0; // 0: Хаотичное кружение (5.0с), 1: Пикирование в точку (1.2с), 2: Спавн Одина
+        private int _stage = 0; // 0: Кружение 13.0с, 1: Плавное пикирование 2.4с, 2: Спавн Одина
+        private AudioSource _audio = null!;
+        private float _audioTimer = 0f;
 
         public void StartRitual(Player target, Vector3 summonPos, GameObject odinPrefab)
         {
@@ -282,14 +279,14 @@ namespace ValheimHostPranks
 
             GameObject? crowPrefab = HostPranksPlugin.FindCrowPrefab();
 
-            // Создаем широкую стаю из 12 черных воронов на дистанции 32-38 метров и высоте 8-16 метров
-            int birdCount = 12;
+            // Создаем внушительную стаю из 30 черных воронов на дистанции 25-45 метров
+            int birdCount = 30;
             for (int i = 0; i < birdCount; i++)
             {
                 float angle = (float)i / birdCount * Mathf.PI * 2f;
-                float dist = UnityEngine.Random.Range(30f, 38f);
-                float height = UnityEngine.Random.Range(8f, 17f);
-                float orbitSpeed = UnityEngine.Random.Range(1.2f, 2.2f) * (i % 2 == 0 ? 1f : -1f); // Часть летит по часовой, часть против!
+                float dist = UnityEngine.Random.Range(25f, 44f);
+                float height = UnityEngine.Random.Range(8f, 24f);
+                float orbitSpeed = UnityEngine.Random.Range(1.0f, 1.9f) * (i % 2 == 0 ? 1f : -1f);
 
                 Vector3 startPos = _target.transform.position + new Vector3(Mathf.Cos(angle) * dist, height, Mathf.Sin(angle) * dist);
 
@@ -321,14 +318,20 @@ namespace ValheimHostPranks
                 _ravens.Add(actor);
             }
 
-            // Нагнетание звука стаи
-            AudioSource audio = gameObject.AddComponent<AudioSource>();
-            audio.spatialBlend = 0.5f;
-            audio.minDistance = 8f;
-            audio.maxDistance = 80f;
-            audio.volume = 1f;
+            // Звук стаи
+            _audio = gameObject.AddComponent<AudioSource>();
+            _audio.spatialBlend = 0.5f;
+            _audio.minDistance = 8f;
+            _audio.maxDistance = 100f;
+            _audio.volume = 1f;
+
+            PlayCrowSound();
+        }
+
+        private void PlayCrowSound()
+        {
             AudioClip? crowClip = FindAudio("sfx_crow_idle") ?? FindAudio("sfx_bird_flight");
-            if (crowClip != null) audio.PlayOneShot(crowClip);
+            if (crowClip != null && _audio != null) _audio.PlayOneShot(crowClip);
         }
 
         private void Update()
@@ -341,15 +344,24 @@ namespace ValheimHostPranks
             }
 
             _timer += Time.deltaTime;
+            _audioTimer += Time.deltaTime;
+
+            // Периодическое карканье стаи каждые 3 секунды во время долгого кружения
+            if (_stage == 0 && _audioTimer >= 3.2f)
+            {
+                _audioTimer = 0f;
+                PlayCrowSound();
+            }
 
             if (_stage == 0)
             {
-                // Стая долго и тревожно кружит вокруг викинга (5.0 секунд)
-                if (_timer >= 5.0f)
+                // Стая долго и тревожно кружит вокруг викинга ровно 13.0 секунд
+                if (_timer >= 13.0f)
                 {
                     _stage = 1;
                     _timer = 0f;
-                    // Все вороны синхронно пикируют в точку призыва Одина
+                    PlayCrowSound();
+                    // Все вороны синхронно и плавно пикируют в точку призыва Одина
                     foreach (var r in _ravens)
                     {
                         if (r != null) r.DiveInto(_summonPos);
@@ -358,8 +370,8 @@ namespace ValheimHostPranks
             }
             else if (_stage == 1)
             {
-                // Вороны стремительно сходятся в точку ровно за 1.15 секунды
-                if (_timer >= 1.15f)
+                // Вороны плавно сходятся в точку за 2.4 секунды
+                if (_timer >= 2.4f)
                 {
                     _stage = 2;
                     SpawnOdinAtConvergence();
@@ -424,7 +436,7 @@ namespace ValheimHostPranks
     }
 
     // =========================================================================
-    // АКТЕР ВОРОНА (ХАОТИЧНОЕ ДВИЖЕНИЕ И ПИКИРОВАНИЕ В ТОЧКУ)
+    // АКТЕР ВОРОНА (ХАОТИЧНОЕ ДВИЖЕНИЕ И ПЛАВНОЕ ПИКИРОВАНИЕ В ТОЧКУ)
     // =========================================================================
     public class RavenActor : MonoBehaviour
     {
@@ -446,7 +458,7 @@ namespace ValheimHostPranks
             _radius = radius;
             _baseHeight = height;
             _speed = speed;
-            _wobbleSeed = UnityEngine.Random.Range(0.5f, 2.5f);
+            _wobbleSeed = UnityEngine.Random.Range(0.5f, 3.5f);
         }
 
         public void DiveInto(Vector3 point)
@@ -461,13 +473,15 @@ namespace ValheimHostPranks
         {
             if (_isDiving)
             {
-                _diveProgress += Time.deltaTime * 0.92f;
+                _diveProgress += Time.deltaTime * 0.42f; // Замедленное плавное пикирование (2.4 сек)
                 float t = Mathf.Clamp01(_diveProgress);
-                Vector3 current = Vector3.Lerp(_diveStartPos, _diveTarget, t * t);
+                // Гладкая интерполяция
+                float smoothT = t * t * (3f - 2f * t);
+                Vector3 current = Vector3.Lerp(_diveStartPos, _diveTarget, smoothT);
                 Vector3 look = _diveTarget - transform.position;
                 if (look.sqrMagnitude > 0.01f)
                 {
-                    transform.rotation = Quaternion.Slerp(transform.rotation, Quaternion.LookRotation(look.normalized), Time.deltaTime * 12f);
+                    transform.rotation = Quaternion.Slerp(transform.rotation, Quaternion.LookRotation(look.normalized), Time.deltaTime * 7f);
                 }
                 transform.position = current;
                 return;
@@ -475,12 +489,11 @@ namespace ValheimHostPranks
 
             if (_target == null) return;
 
-            // Хаотичное кружение с переменным радиусом и волнообразным взмахом высоты
             _angle += Time.deltaTime * _speed;
             Vector3 center = _target.transform.position;
 
-            float dynamicRadius = _radius + Mathf.Sin(_angle * 2.5f + _wobbleSeed) * 3.5f;
-            float dynamicHeight = _baseHeight + Mathf.Sin(_angle * 3.8f + _wobbleSeed) * 2.2f;
+            float dynamicRadius = _radius + Mathf.Sin(_angle * 2.2f + _wobbleSeed) * 4.5f;
+            float dynamicHeight = _baseHeight + Mathf.Sin(_angle * 3.1f + _wobbleSeed) * 2.8f;
 
             Vector3 targetPos = new Vector3(
                 center.x + Mathf.Cos(_angle) * dynamicRadius,
@@ -491,14 +504,14 @@ namespace ValheimHostPranks
             Vector3 moveDir = (targetPos - transform.position);
             if (moveDir.sqrMagnitude > 0.01f)
             {
-                transform.rotation = Quaternion.Slerp(transform.rotation, Quaternion.LookRotation(moveDir.normalized), Time.deltaTime * 7f);
+                transform.rotation = Quaternion.Slerp(transform.rotation, Quaternion.LookRotation(moveDir.normalized), Time.deltaTime * 6f);
             }
             transform.position = targetPos;
         }
     }
 
     // =========================================================================
-    // ОДИН: ВЗМАХ ПОСОХОМ -> МОЛНИЯ -> ИСЧЕЗНОВЕНИЕ И ВЕЕРНЫЙ РАЗЛЕТ ВОРОНОВ
+    // ОДИН: ПАУЗА 2.8с -> ВЗМАХ 1.6с СО ЗВУКОМ ЗАРЯДКИ -> МОЛНИЯ СО ЗВУКОМ -> РАЗЛЕТ
     // =========================================================================
     public class OdinPrankController : MonoBehaviour
     {
@@ -508,13 +521,19 @@ namespace ValheimHostPranks
         private int _phase = 0; 
         private Light _lightningLight = null!;
         private GameObject? _staffSparkGlow = null;
+        private AudioSource _audio = null!;
 
         public void Initialize(Player target, EffectList? despawnFx)
         {
             _target = target;
             _despawnEffects = despawnFx;
 
-            // Начальный взрыв дыма при появлении из стаи
+            _audio = gameObject.AddComponent<AudioSource>();
+            _audio.spatialBlend = 0.6f;
+            _audio.minDistance = 6f;
+            _audio.maxDistance = 140f;
+            _audio.volume = 1f;
+
             if (_despawnEffects != null)
             {
                 _despawnEffects.Create(transform.position, transform.rotation);
@@ -527,32 +546,32 @@ namespace ValheimHostPranks
 
             if (_phase == 0)
             {
-                // Фаза 0 (0 to 1.5s): Стоит, поворачиваясь лицом к викингу
+                // Фаза 0: Стоит 2.8 секунды, поворачиваясь лицом к викингу (немой контакт)
                 if (_target != null)
                 {
                     Vector3 lookDir = _target.transform.position - transform.position;
                     lookDir.y = 0f;
                     if (lookDir.sqrMagnitude > 0.01f)
                     {
-                        transform.rotation = Quaternion.Slerp(transform.rotation, Quaternion.LookRotation(lookDir.normalized), Time.deltaTime * 6f);
+                        transform.rotation = Quaternion.Slerp(transform.rotation, Quaternion.LookRotation(lookDir.normalized), Time.deltaTime * 5f);
                     }
                 }
 
-                if (_stateTimer >= 1.5f)
+                if (_stateTimer >= 2.8f)
                 {
-                    _phase = 1; // Замах посохом
+                    _phase = 1; // Медленный замах посохом
                     _stateTimer = 0f;
                     PrepareStaffStrike();
                 }
             }
             else if (_phase == 1)
             {
-                // Фаза 1 (1.5 to 2.3s): Вскидывает посох к небесам
-                transform.Rotate(Vector3.right, -8f * Time.deltaTime);
+                // Фаза 1: Медленный подъем посоха в течение 1.6 секунды с нарастанием плазмы
+                transform.Rotate(Vector3.right, -4.5f * Time.deltaTime);
 
-                if (_stateTimer >= 0.75f)
+                if (_stateTimer >= 1.6f)
                 {
-                    _phase = 2; // УДАР МОЛНИИ И РАСПАД НА СТАЮ ВОРОНОВ!
+                    _phase = 2; // УДАР МОЛНИИ СО ЗВУКОМ!
                     _stateTimer = 0f;
                     if (_staffSparkGlow != null) Destroy(_staffSparkGlow);
                     ExecuteCinematicStrikeAndDisperse();
@@ -560,13 +579,12 @@ namespace ValheimHostPranks
             }
             else if (_phase == 2)
             {
-                // Фаза 2: Вспышка затухает, Один уже исчез, контроллер удаляет свет и объект
                 if (_lightningLight != null)
                 {
-                    _lightningLight.intensity = Mathf.MoveTowards(_lightningLight.intensity, 0f, Time.deltaTime * 40f);
+                    _lightningLight.intensity = Mathf.MoveTowards(_lightningLight.intensity, 0f, Time.deltaTime * 35f);
                 }
 
-                if (_stateTimer >= 0.5f)
+                if (_stateTimer >= 0.6f)
                 {
                     if (_lightningLight != null) Destroy(_lightningLight.gameObject);
                     Destroy(gameObject);
@@ -576,15 +594,20 @@ namespace ValheimHostPranks
 
         private void PrepareStaffStrike()
         {
+            // Сияние плазмы на верхушке посоха
             _staffSparkGlow = new GameObject("StaffPlasmaGlow");
             _staffSparkGlow.transform.position = transform.position + transform.up * 1.8f + transform.right * 0.4f;
             _staffSparkGlow.transform.parent = transform;
 
             Light staffLight = _staffSparkGlow.AddComponent<Light>();
             staffLight.type = LightType.Point;
-            staffLight.color = new Color(0.4f, 0.8f, 1.0f);
-            staffLight.intensity = 8f;
-            staffLight.range = 10f;
+            staffLight.color = new Color(0.45f, 0.85f, 1.0f);
+            staffLight.intensity = 10f;
+            staffLight.range = 14f;
+
+            // Звук накапливающегося электрического заряда
+            AudioClip chargeClip = SoundSynthesizer.GetElectricChargeClip();
+            _audio.PlayOneShot(chargeClip, 0.9f);
         }
 
         private void ExecuteCinematicStrikeAndDisperse()
@@ -605,7 +628,7 @@ namespace ValheimHostPranks
                 if (gh > 0f) strikePos.y = gh;
             }
 
-            // 1. Ветвистая 3D-молния с небес
+            // 1. Ветвистая 3D-молния
             GameObject lightningObj = new GameObject("ProceduralLightningBolt");
             ProceduralLightningBolt bolt = lightningObj.AddComponent<ProceduralLightningBolt>();
             bolt.Initialize(strikePos);
@@ -615,14 +638,14 @@ namespace ValheimHostPranks
             lightObj.transform.position = strikePos + Vector3.up * 3f;
             _lightningLight = lightObj.AddComponent<Light>();
             _lightningLight.type = LightType.Point;
-            _lightningLight.color = new Color(0.75f, 0.92f, 1.0f);
-            _lightningLight.intensity = 22f;
-            _lightningLight.range = 55f;
+            _lightningLight.color = new Color(0.8f, 0.94f, 1.0f);
+            _lightningLight.intensity = 25f;
+            _lightningLight.range = 60f;
 
-            // 3. Тряска камеры
+            // 3. Тряска экрана
             if (GameCamera.instance != null)
             {
-                GameCamera.instance.AddShake(strikePos, 18f, 1.4f, true);
+                GameCamera.instance.AddShake(strikePos, 19f, 1.5f, true);
             }
 
             // 4. Безопасная ударная волна (отбрасывает игрока назад на 2 метра)
@@ -633,41 +656,51 @@ namespace ValheimHostPranks
                 _target.ApplyPushback(pushDir, 14f);
             }
 
-            // 5. Гром
-            AudioSource audio = gameObject.AddComponent<AudioSource>();
-            audio.spatialBlend = 0.6f;
-            audio.minDistance = 6f;
-            audio.maxDistance = 140f;
-            audio.volume = 1f;
-            AudioClip? thunderClip = FindThunderClip();
-            if (thunderClip != null) audio.PlayOneShot(thunderClip);
+            // 5. МОЩНЫЙ ЗВУК МОЛНИИ (СУПЕРЗВУКОВОЙ РАЗРЯД + РАСКАТ ГРОМА)
+            AudioClip lightningStrikeClip = SoundSynthesizer.GetFullLightningStrikeClip();
+            _audio.PlayOneShot(lightningStrikeClip, 1.0f);
 
-            // 6. ОДИН ИСЧЕЗАЕТ В КЛУБАХ ЧЕРНОГО ДЫМА
+            // Подключаем игровой эффект грозы если есть
+            TriggerGameThunderEffect(strikePos);
+
+            // 6. Один исчезает в клубах черного дыма
             Vector3 odinPos = transform.position;
             if (_despawnEffects != null)
             {
                 _despawnEffects.Create(odinPos, transform.rotation);
             }
 
-            // Скрываем все рендереры Одина немедленно
             foreach (var r in GetComponentsInChildren<Renderer>())
             {
                 if (r != null) r.enabled = false;
             }
 
-            // 7. ИЗ ТОЧКИ ОДИНА ВЕЕРОМ ВО ВСЕ СТОРОНЫ РАЗЛЕТАЮТСЯ ВОРОНЫ («КТО КУДА ГЛЯДЯТ»)
+            // 7. Веерный разлет 24 воронов во все стороны света
             SpawnExplodingCrowFlock(odinPos);
+        }
+
+        private void TriggerGameThunderEffect(Vector3 pos)
+        {
+            try
+            {
+                Thunder[] thunders = Resources.FindObjectsOfTypeAll<Thunder>();
+                if (thunders != null && thunders.Length > 0 && thunders[0].m_thunderEffect != null)
+                {
+                    thunders[0].m_thunderEffect.Create(pos, Quaternion.identity);
+                }
+            }
+            catch { }
         }
 
         private void SpawnExplodingCrowFlock(Vector3 originPos)
         {
             GameObject? crowPrefab = HostPranksPlugin.FindCrowPrefab();
-            int flockCount = 10;
+            int flockCount = 24;
 
             for (int i = 0; i < flockCount; i++)
             {
-                float angle = (float)i / flockCount * Mathf.PI * 2f + UnityEngine.Random.Range(-0.25f, 0.25f);
-                Vector3 spreadDir = new Vector3(Mathf.Cos(angle), UnityEngine.Random.Range(0.35f, 0.9f), Mathf.Sin(angle)).normalized;
+                float angle = (float)i / flockCount * Mathf.PI * 2f + UnityEngine.Random.Range(-0.2f, 0.2f);
+                Vector3 spreadDir = new Vector3(Mathf.Cos(angle), UnityEngine.Random.Range(0.25f, 0.75f), Mathf.Sin(angle)).normalized;
 
                 GameObject raven;
                 if (crowPrefab != null)
@@ -692,31 +725,77 @@ namespace ValheimHostPranks
                     if (r != null && r.material != null) r.material.color = new Color(0.06f, 0.06f, 0.06f, 1.0f);
                 }
 
-                // Навешиваем скрипт скоростного веерного разлета в небо
                 ScatteringRaven scattering = raven.AddComponent<ScatteringRaven>();
-                scattering.Launch(spreadDir, UnityEngine.Random.Range(22f, 32f));
+                scattering.Launch(spreadDir, UnityEngine.Random.Range(13f, 17f)); // Естественная скорость полета птиц
             }
         }
+    }
 
-        private AudioClip? FindThunderClip()
+    // =========================================================================
+    // СИНТЕЗАТОР ЗВУКОВ МОЛНИИ И ЭЛЕКТРИЧЕСКОГО РАЗРЯДА
+    // =========================================================================
+    public static class SoundSynthesizer
+    {
+        private static AudioClip? _cachedChargeClip;
+        private static AudioClip? _cachedStrikeClip;
+
+        public static AudioClip GetElectricChargeClip()
         {
-            if (ZNetScene.instance == null) return null;
-            string[] searchPrefabs = new string[] { "vfx_eikthyr_lightning", "vfx_lightning", "sfx_thunder", "Thunder" };
-            foreach (var name in searchPrefabs)
+            if (_cachedChargeClip != null) return _cachedChargeClip;
+            int sampleRate = 44100;
+            float duration = 1.6f;
+            int samples = (int)(sampleRate * duration);
+            float[] data = new float[samples];
+            System.Random rand = new System.Random(777);
+
+            for (int i = 0; i < samples; i++)
             {
-                GameObject p = ZNetScene.instance.GetPrefab(name);
-                if (p != null)
-                {
-                    var a = p.GetComponentInChildren<AudioSource>(true);
-                    if (a != null && a.clip != null) return a.clip;
-                    var zsfx = p.GetComponentInChildren<ZSFX>(true);
-                    if (zsfx != null && zsfx.m_audioClips != null && zsfx.m_audioClips.Length > 0)
-                    {
-                        return zsfx.m_audioClips[0];
-                    }
-                }
+                float t = (float)i / sampleRate;
+                float progress = t / duration; // Нарастание от 0 к 1
+
+                // Нарастающий гул частоты
+                float freq = Mathf.Lerp(120f, 650f, progress * progress);
+                float hum = Mathf.Sin(2f * Mathf.PI * freq * t) * 0.4f;
+
+                // Электрический треск искр с нарастающей частотой
+                float crackle = (float)(rand.NextDouble() * 2.0 - 1.0) * (rand.NextDouble() > (0.95 - progress * 0.35) ? 0.6f : 0.0f);
+
+                data[i] = (hum + crackle) * progress * 0.5f;
             }
-            return null;
+
+            _cachedChargeClip = AudioClip.Create("ElectricChargeUp", samples, 1, sampleRate, false);
+            _cachedChargeClip.SetData(data, 0);
+            return _cachedChargeClip;
+        }
+
+        public static AudioClip GetFullLightningStrikeClip()
+        {
+            if (_cachedStrikeClip != null) return _cachedStrikeClip;
+            int sampleRate = 44100;
+            float duration = 2.2f;
+            int samples = (int)(sampleRate * duration);
+            float[] data = new float[samples];
+            System.Random rand = new System.Random(999);
+
+            for (int i = 0; i < samples; i++)
+            {
+                float t = (float)i / sampleRate;
+
+                // 1. Сверхзвуковой сухой щелчок электрической дуги (Snap) в первые 0.08с
+                float snap = (t < 0.08f) ? (float)(rand.NextDouble() * 2.0 - 1.0) * Mathf.Exp(-t * 50f) * 1.5f : 0f;
+
+                // 2. Глубокий басовый раскат грома (Boom) 45-90 Гц с реалистичным рокотом
+                float boom = (Mathf.Sin(2f * Mathf.PI * 48f * t) + Mathf.Sin(2f * Mathf.PI * 86f * t) * 0.6f) * Mathf.Exp(-t * 2.2f) * 0.85f;
+
+                // 3. Остаточный треск электрической плазмы
+                float sizzle = (float)(rand.NextDouble() * 2.0 - 1.0) * Mathf.Exp(-t * 5.5f) * 0.3f;
+
+                data[i] = Mathf.Clamp(snap + boom + sizzle, -1f, 1f);
+            }
+
+            _cachedStrikeClip = AudioClip.Create("FullLightningStrike", samples, 1, sampleRate, false);
+            _cachedStrikeClip.SetData(data, 0);
+            return _cachedStrikeClip;
         }
     }
 
@@ -728,7 +807,7 @@ namespace ValheimHostPranks
         private Vector3 _flyDirection;
         private float _speed;
         private float _timeAlive = 0f;
-        private const float MaxLifetime = 4.0f;
+        private const float MaxLifetime = 6.0f;
 
         public void Launch(Vector3 direction, float speed)
         {
@@ -740,7 +819,6 @@ namespace ValheimHostPranks
         private void Update()
         {
             _timeAlive += Time.deltaTime;
-            // Полет вдаль с легким взлетом вверх
             transform.position += _flyDirection * _speed * Time.deltaTime;
 
             if (_timeAlive >= MaxLifetime)
@@ -760,7 +838,7 @@ namespace ValheimHostPranks
         private Vector3 _startPos;
         private Vector3 _endPos;
         private float _timeAlive = 0f;
-        private float _duration = 0.4f;
+        private float _duration = 0.45f;
         private float _flickerTimer = 0f;
         private const int SegmentCount = 20;
 
@@ -779,7 +857,7 @@ namespace ValheimHostPranks
             _mainLine.material = boltMaterial;
             _mainLine.startColor = new Color(0.95f, 0.98f, 1.0f, 1.0f);
             _mainLine.endColor = new Color(0.6f, 0.85f, 1.0f, 1.0f);
-            _mainLine.startWidth = 0.65f;
+            _mainLine.startWidth = 0.7f;
             _mainLine.endWidth = 0.35f;
             _mainLine.positionCount = SegmentCount;
 
