@@ -12,7 +12,7 @@ namespace ValheimHostPranks
     {
         public const string ModGUID = "com.anonim.valheimhostpranks";
         public const string ModName = "Valheim Host Pranks";
-        public const string ModVersion = "1.0.8";
+        public const string ModVersion = "1.0.9";
 
         public static HostPranksPlugin Instance { get; private set; } = null!;
 
@@ -123,7 +123,7 @@ namespace ValheimHostPranks
 
             GUILayout.Space(6);
 
-            // Кнопка очистки застрявших ворон возле дома
+            // Кнопка очистки застрявших ворон
             if (GUILayout.Button("🧹 Очистить лишних ворон возле дома", GUILayout.Height(26)))
             {
                 CleanExistingCrowsAroundLocalPlayer();
@@ -152,18 +152,17 @@ namespace ValheimHostPranks
             {
                 if (bird != null && Vector3.Distance(bird.transform.position, center) <= 120f)
                 {
-                    SafelyDestroyNetworkObject(bird.gameObject);
+                    SafelyDestroyValheimObject(bird.gameObject);
                     count++;
                 }
             }
 
-            // Находим процедурных ворон если остались
             var ravens = UnityEngine.Object.FindObjectsByType<ScatteringRaven>(FindObjectsSortMode.None);
             foreach (var r in ravens)
             {
                 if (r != null)
                 {
-                    SafelyDestroyNetworkObject(r.gameObject);
+                    UnityEngine.Object.Destroy(r.gameObject);
                     count++;
                 }
             }
@@ -173,7 +172,7 @@ namespace ValheimHostPranks
             {
                 if (a != null)
                 {
-                    SafelyDestroyNetworkObject(a.gameObject);
+                    UnityEngine.Object.Destroy(a.gameObject);
                     count++;
                 }
             }
@@ -181,29 +180,23 @@ namespace ValheimHostPranks
             SetStatus($"🧹 Удалено {count} ворон в радиусе 120м от вас!");
         }
 
-        public static void SafelyDestroyNetworkObject(GameObject go)
+        public static void SafelyDestroyValheimObject(GameObject go)
         {
             if (go == null) return;
 
-            ZNetView znv = go.GetComponent<ZNetView>();
-            if (znv != null && znv.GetZDO() != null)
+            try
             {
-                ZDO zdo = znv.GetZDO();
-                znv.ResetZDO();
-                if (ZDOMan.instance != null && zdo.IsOwner())
+                ZNetView znv = go.GetComponent<ZNetView>();
+                if (znv != null && ZNetScene.instance != null)
                 {
-                    ZDOMan.instance.DestroyZDO(zdo);
+                    // Точный вызов как в штатной консольной команде forcedelete
+                    ZNetScene.instance.Destroy(go);
+                    return;
                 }
             }
+            catch { }
 
-            if (ZNetScene.instance != null)
-            {
-                ZNetScene.instance.Destroy(go);
-            }
-            else
-            {
-                UnityEngine.Object.Destroy(go);
-            }
+            UnityEngine.Object.Destroy(go);
         }
 
         private void TriggerOdinCinemaPrank(Player target)
@@ -308,25 +301,47 @@ namespace ValheimHostPranks
             return null;
         }
 
-        public static GameObject? FindCrowPrefab()
+        // Возвращает ТОЛЬКО чистую визуальную модель птицы (БЕЗ ZNetView, БЕЗ сети!)
+        public static GameObject? CreatePureVisualCrow()
         {
+            GameObject? crowPrefab = null;
             if (ZNetScene.instance != null)
             {
-                var p = ZNetScene.instance.GetPrefab("Crow") ?? ZNetScene.instance.GetPrefab("crow") ?? ZNetScene.instance.GetPrefab("Seagal");
-                if (p != null) return p;
+                crowPrefab = ZNetScene.instance.GetPrefab("Crow") ?? ZNetScene.instance.GetPrefab("crow") ?? ZNetScene.instance.GetPrefab("Seagal");
+            }
 
-                if (ZNetScene.instance.m_prefabs != null)
+            if (crowPrefab != null)
+            {
+                RandomFlyingBird birdComp = crowPrefab.GetComponent<RandomFlyingBird>();
+                GameObject template = (birdComp != null && birdComp.m_flyingModel != null) ? birdComp.m_flyingModel : crowPrefab;
+
+                GameObject visual = UnityEngine.Object.Instantiate(template);
+
+                // Очищаем любые сетевые скрипты и коллайдеры
+                var znv = visual.GetComponent<ZNetView>();
+                if (znv != null) UnityEngine.Object.DestroyImmediate(znv);
+                var ai = visual.GetComponent<RandomFlyingBird>();
+                if (ai != null) UnityEngine.Object.DestroyImmediate(ai);
+                var cols = visual.GetComponentsInChildren<Collider>(true);
+                foreach (var c in cols) UnityEngine.Object.DestroyImmediate(c);
+
+                foreach (var r in visual.GetComponentsInChildren<Renderer>(true))
                 {
-                    foreach (var go in ZNetScene.instance.m_prefabs)
+                    if (r != null && r.material != null)
                     {
-                        if (go != null && (go.GetComponent<RandomFlyingBird>() != null || go.name.Equals("Crow", StringComparison.OrdinalIgnoreCase)))
-                        {
-                            return go;
-                        }
+                        r.material.color = new Color(0.06f, 0.06f, 0.06f, 1.0f);
                     }
                 }
+
+                return visual;
             }
-            return null;
+
+            GameObject fallback = GameObject.CreatePrimitive(PrimitiveType.Cube);
+            fallback.name = "ProceduralRaven";
+            fallback.transform.localScale = new Vector3(0.35f, 0.08f, 0.6f);
+            var col = fallback.GetComponent<Collider>();
+            if (col != null) UnityEngine.Object.DestroyImmediate(col);
+            return fallback;
         }
     }
 
@@ -350,9 +365,7 @@ namespace ValheimHostPranks
             _summonPos = summonPos;
             _odinPrefab = odinPrefab;
 
-            GameObject? crowPrefab = HostPranksPlugin.FindCrowPrefab();
-
-            // Создаем стаю из 30 черных воронов на дистанции 25-45 метров
+            // Создаем стаю из 30 ЧИСТО ВИЗУАЛЬНЫХ ворон (никаких ZDO и сети!)
             int birdCount = 30;
             for (int i = 0; i < birdCount; i++)
             {
@@ -363,51 +376,21 @@ namespace ValheimHostPranks
 
                 Vector3 startPos = _target.transform.position + new Vector3(Mathf.Cos(angle) * dist, height, Mathf.Sin(angle) * dist);
 
-                GameObject birdObj;
-                if (crowPrefab != null)
-                {
-                    birdObj = UnityEngine.Object.Instantiate(crowPrefab, startPos, Quaternion.identity);
-
-                    // КРИТИЧНО: ПОЛНОСТЬЮ ОТВЯЗЫВАЕМ ОТ СЕТИ ZDO, ЧТОБЫ ИГРА НЕ СОХРАНЯЛА ИХ В МИР!
-                    var zview = birdObj.GetComponent<ZNetView>();
-                    if (zview != null)
-                    {
-                        if (zview.GetZDO() != null && ZDOMan.instance != null)
-                        {
-                            ZDOMan.instance.DestroyZDO(zview.GetZDO());
-                        }
-                        zview.ResetZDO();
-                        UnityEngine.Object.DestroyImmediate(zview);
-                    }
-
-                    var birdAi = birdObj.GetComponent<RandomFlyingBird>();
-                    if (birdAi != null) UnityEngine.Object.Destroy(birdAi);
-                }
-                else
-                {
-                    birdObj = CreateProceduralRavenVisual();
-                    birdObj.transform.position = startPos;
-                }
-
-                foreach (var renderer in birdObj.GetComponentsInChildren<Renderer>(true))
-                {
-                    if (renderer != null && renderer.material != null)
-                    {
-                        renderer.material.color = new Color(0.06f, 0.06f, 0.06f, 1.0f);
-                    }
-                }
+                GameObject? birdObj = HostPranksPlugin.CreatePureVisualCrow();
+                if (birdObj == null) continue;
+                birdObj.transform.position = startPos;
 
                 RavenActor actor = birdObj.AddComponent<RavenActor>();
                 actor.Initialize(_target, angle, dist, height, orbitSpeed);
                 _ravens.Add(actor);
             }
 
-            // Звук стаи (комфортная умеренная громкость 0.5)
+            // Звук стаи: полная громкость 1.0f как просил пользователь!
             _audio = gameObject.AddComponent<AudioSource>();
             _audio.spatialBlend = 0.5f;
             _audio.minDistance = 8f;
-            _audio.maxDistance = 80f;
-            _audio.volume = 0.5f;
+            _audio.maxDistance = 100f;
+            _audio.volume = 1.0f;
 
             PlayCrowSound();
         }
@@ -415,7 +398,7 @@ namespace ValheimHostPranks
         private void PlayCrowSound()
         {
             AudioClip? crowClip = FindAudio("sfx_crow_idle") ?? FindAudio("sfx_bird_flight");
-            if (crowClip != null && _audio != null) _audio.PlayOneShot(crowClip, 0.5f);
+            if (crowClip != null && _audio != null) _audio.PlayOneShot(crowClip, 1.0f);
         }
 
         private void Update()
@@ -430,7 +413,7 @@ namespace ValheimHostPranks
             _timer += Time.deltaTime;
             _audioTimer += Time.deltaTime;
 
-            if (_stage == 0 && _audioTimer >= 3.5f)
+            if (_stage == 0 && _audioTimer >= 3.2f)
             {
                 _audioTimer = 0f;
                 PlayCrowSound();
@@ -438,7 +421,7 @@ namespace ValheimHostPranks
 
             if (_stage == 0)
             {
-                // Стая тревожно кружит 13.0 секунд
+                // Стая кружит ровно 13.0 секунд
                 if (_timer >= 13.0f)
                 {
                     _stage = 1;
@@ -489,20 +472,10 @@ namespace ValheimHostPranks
             {
                 if (r != null)
                 {
-                    HostPranksPlugin.SafelyDestroyNetworkObject(r.gameObject);
+                    UnityEngine.Object.Destroy(r.gameObject);
                 }
             }
             _ravens.Clear();
-        }
-
-        private GameObject CreateProceduralRavenVisual()
-        {
-            GameObject bird = GameObject.CreatePrimitive(PrimitiveType.Cube);
-            bird.name = "ProceduralRaven";
-            bird.transform.localScale = new Vector3(0.35f, 0.08f, 0.6f);
-            var col = bird.GetComponent<Collider>();
-            if (col != null) Destroy(col);
-            return bird;
         }
 
         private AudioClip? FindAudio(string name)
@@ -686,7 +659,6 @@ namespace ValheimHostPranks
             staffLight.intensity = 10f;
             staffLight.range = 14f;
 
-            // Звук зарядки (комфортная умеренная громкость 0.45)
             AudioClip chargeClip = SoundSynthesizer.GetElectricChargeClip();
             _audio.PlayOneShot(chargeClip, 0.45f);
         }
@@ -723,7 +695,7 @@ namespace ValheimHostPranks
             _lightningLight.intensity = 25f;
             _lightningLight.range = 60f;
 
-            // 3. Тряска камеры
+            // 3. Тряска экрана
             if (GameCamera.instance != null)
             {
                 GameCamera.instance.AddShake(strikePos, 19f, 1.5f, true);
@@ -737,7 +709,7 @@ namespace ValheimHostPranks
                 _target.ApplyPushback(pushDir, 14f);
             }
 
-            // 5. Звук молнии (умеренная комфортная громкость 0.65)
+            // 5. Звук молнии
             AudioClip lightningStrikeClip = SoundSynthesizer.GetFullLightningStrikeClip();
             _audio.PlayOneShot(lightningStrikeClip, 0.65f);
 
@@ -774,7 +746,6 @@ namespace ValheimHostPranks
 
         private void SpawnExplodingCrowFlock(Vector3 originPos)
         {
-            GameObject? crowPrefab = HostPranksPlugin.FindCrowPrefab();
             int flockCount = 24;
 
             for (int i = 0; i < flockCount; i++)
@@ -782,39 +753,11 @@ namespace ValheimHostPranks
                 float angle = (float)i / flockCount * Mathf.PI * 2f + UnityEngine.Random.Range(-0.2f, 0.2f);
                 Vector3 spreadDir = new Vector3(Mathf.Cos(angle), UnityEngine.Random.Range(0.25f, 0.75f), Mathf.Sin(angle)).normalized;
 
-                GameObject raven;
-                if (crowPrefab != null)
-                {
-                    raven = UnityEngine.Object.Instantiate(crowPrefab, originPos + Vector3.up * 1.5f, Quaternion.LookRotation(spreadDir));
+                GameObject? raven = HostPranksPlugin.CreatePureVisualCrow();
+                if (raven == null) continue;
 
-                    // ОТВЯЗЫВАЕМ ОТ СЕТИ
-                    var zview = raven.GetComponent<ZNetView>();
-                    if (zview != null)
-                    {
-                        if (zview.GetZDO() != null && ZDOMan.instance != null)
-                        {
-                            ZDOMan.instance.DestroyZDO(zview.GetZDO());
-                        }
-                        zview.ResetZDO();
-                        UnityEngine.Object.DestroyImmediate(zview);
-                    }
-
-                    var ai = raven.GetComponent<RandomFlyingBird>();
-                    if (ai != null) Destroy(ai);
-                }
-                else
-                {
-                    raven = GameObject.CreatePrimitive(PrimitiveType.Cube);
-                    raven.transform.position = originPos + Vector3.up * 1.5f;
-                    raven.transform.localScale = new Vector3(0.35f, 0.08f, 0.6f);
-                    var col = raven.GetComponent<Collider>();
-                    if (col != null) Destroy(col);
-                }
-
-                foreach (var r in raven.GetComponentsInChildren<Renderer>(true))
-                {
-                    if (r != null && r.material != null) r.material.color = new Color(0.06f, 0.06f, 0.06f, 1.0f);
-                }
+                raven.transform.position = originPos + Vector3.up * 1.5f;
+                raven.transform.rotation = Quaternion.LookRotation(spreadDir);
 
                 ScatteringRaven scattering = raven.AddComponent<ScatteringRaven>();
                 scattering.Launch(spreadDir, UnityEngine.Random.Range(13f, 17f));
@@ -869,13 +812,8 @@ namespace ValheimHostPranks
             {
                 float t = (float)i / sampleRate;
 
-                // Умеренный сухой щелчок
                 float snap = (t < 0.07f) ? (float)(rand.NextDouble() * 2.0 - 1.0) * Mathf.Exp(-t * 60f) * 1.1f : 0f;
-
-                // Мягкий басовый раскат грома
                 float boom = (Mathf.Sin(2f * Mathf.PI * 48f * t) + Mathf.Sin(2f * Mathf.PI * 86f * t) * 0.5f) * Mathf.Exp(-t * 2.2f) * 0.65f;
-
-                // Остаточный треск
                 float sizzle = (float)(rand.NextDouble() * 2.0 - 1.0) * Mathf.Exp(-t * 5.5f) * 0.2f;
 
                 data[i] = Mathf.Clamp((snap + boom + sizzle) * 0.75f, -1f, 1f);
@@ -911,7 +849,7 @@ namespace ValheimHostPranks
 
             if (_timeAlive >= MaxLifetime)
             {
-                HostPranksPlugin.SafelyDestroyNetworkObject(gameObject);
+                UnityEngine.Object.Destroy(gameObject);
             }
         }
     }
