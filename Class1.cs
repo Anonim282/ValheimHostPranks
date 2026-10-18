@@ -11,7 +11,7 @@ namespace ValheimHostPranks
     {
         public const string ModGUID = "com.anonim.valheimhostpranks";
         public const string ModName = "Valheim Host Pranks";
-        public const string ModVersion = "1.0.3";
+        public const string ModVersion = "1.0.4";
 
         public static HostPranksPlugin Instance { get; private set; } = null!;
 
@@ -109,7 +109,7 @@ namespace ValheimHostPranks
                     GUILayout.BeginHorizontal();
 
                     // Кнопка: Кара Одина
-                    if (GUILayout.Button("⚡ Кара Одина (10м, 0 урона)", GUILayout.Height(28)))
+                    if (GUILayout.Button("⚡ Кара Одина (Эпичная молния)", GUILayout.Height(28)))
                     {
                         TriggerOdinPrank(player);
                     }
@@ -147,7 +147,7 @@ namespace ValheimHostPranks
                 return;
             }
 
-            // Позиция спавна: 10 метров перед лицом игрока (красивая панорамная дистанция)
+            // Позиция спавна: 10 метров перед лицом игрока
             Vector3 forward = target.transform.forward;
             forward.y = 0f;
             if (forward.sqrMagnitude < 0.01f) forward = Vector3.forward;
@@ -179,7 +179,7 @@ namespace ValheimHostPranks
             OdinPrankController controller = odinInstance.AddComponent<OdinPrankController>();
             controller.Initialize(target, despawnEffects);
 
-            SetStatus($"⚡ Один ({odinPrefab.name}) явился перед '{target.GetPlayerName()}' на дистанции 10м!");
+            SetStatus($"⚡ Один явился перед '{target.GetPlayerName()}' на дистанции 10м!");
         }
 
         private GameObject? FindOdinPrefab()
@@ -195,9 +195,12 @@ namespace ValheimHostPranks
                 {
                     foreach (var go in ZNetScene.instance.m_prefabs)
                     {
-                        if (go != null && (go.GetComponent<Odin>() != null || go.name.Equals("Odin", StringComparison.OrdinalIgnoreCase)))
+                        if (go != null)
                         {
-                            return go;
+                            if (go.GetComponent<Odin>() != null || go.name.Equals("Odin", StringComparison.OrdinalIgnoreCase))
+                            {
+                                return go;
+                            }
                         }
                     }
                 }
@@ -206,9 +209,12 @@ namespace ValheimHostPranks
                 {
                     foreach (var go in ZNetScene.instance.m_nonNetViewPrefabs)
                     {
-                        if (go != null && (go.GetComponent<Odin>() != null || go.name.Equals("Odin", StringComparison.OrdinalIgnoreCase)))
+                        if (go != null)
                         {
-                            return go;
+                            if (go.GetComponent<Odin>() != null || go.name.Equals("Odin", StringComparison.OrdinalIgnoreCase))
+                            {
+                                return go;
+                            }
                         }
                     }
                 }
@@ -266,7 +272,7 @@ namespace ValheimHostPranks
     }
 
     // =========================================================================
-    // КОНТРОЛЛЕР: КАРА ОДИНА (ПОЯВЛЕНИЕ 10м -> МОЛНИЯ 0 УРОНА -> ВЗЛЕТ В НЕБЕСА)
+    // КОНТРОЛЛЕР: КАРА ОДИНА
     // =========================================================================
     public class OdinPrankController : MonoBehaviour
     {
@@ -316,13 +322,13 @@ namespace ValheimHostPranks
             }
             else if (_phase == 1)
             {
-                // Фаза 1: Ослепительная вспышка света быстро затухает (0.35 сек)
+                // Фаза 1: Вспышка света затухает (0.4 сек)
                 if (_lightningLight != null)
                 {
-                    _lightningLight.intensity = Mathf.MoveTowards(_lightningLight.intensity, 0f, Time.deltaTime * 25f);
+                    _lightningLight.intensity = Mathf.MoveTowards(_lightningLight.intensity, 0f, Time.deltaTime * 35f);
                 }
 
-                if (_stateTimer >= 0.35f)
+                if (_stateTimer >= 0.45f)
                 {
                     _phase = 2;
                     _stateTimer = 0f;
@@ -353,7 +359,7 @@ namespace ValheimHostPranks
 
         private void ExecuteSafeLightningStrike()
         {
-            // Точка удара молнии: на земле между Одином и игроком (примерно в 3 метрах перед игроком)
+            // Точка удара молнии: на земле прямо перед игроком (в 2.5 метрах перед его взором)
             Vector3 strikePos;
             if (_target != null)
             {
@@ -370,66 +376,31 @@ namespace ValheimHostPranks
                 if (gh > 0f) strikePos.y = gh;
             }
 
-            // 1. Ослепительная сине-белая вспышка света (чистый свет, без коллайдеров и урона!)
+            // 1. Создаем эффектный процедурный 3D-разряд молнии из облаков (55м) прямо в землю!
+            GameObject lightningObj = new GameObject("ProceduralLightningBolt");
+            ProceduralLightningBolt bolt = lightningObj.AddComponent<ProceduralLightningBolt>();
+            bolt.Initialize(strikePos);
+
+            // 2. Ослепительная сине-белая вспышка света (без урона!)
             GameObject lightObj = new GameObject("OdinSafeLightningFlash");
             lightObj.transform.position = strikePos + Vector3.up * 3f;
             _lightningLight = lightObj.AddComponent<Light>();
             _lightningLight.type = LightType.Point;
-            _lightningLight.color = new Color(0.7f, 0.9f, 1.0f);
-            _lightningLight.intensity = 15f;
-            _lightningLight.range = 45f;
+            _lightningLight.color = new Color(0.75f, 0.92f, 1.0f);
+            _lightningLight.intensity = 20f;
+            _lightningLight.range = 50f;
 
-            // 2. Сильная тряска экрана у игрока (эффект кинематографичной ударной волны)
+            // 3. Сильная тряска экрана у игрока (эффект кинематографичной ударной волны)
             if (GameCamera.instance != null)
             {
-                GameCamera.instance.AddShake(strikePos, 16f, 1.4f, true);
-            }
-
-            // 3. Безопасные визуальные эффекты (строго БЕЗ урона!)
-            if (ZNetScene.instance != null)
-            {
-                // Исключены любые AOE префабы! Только чистые визуальные эффекты
-                string[] safeVisuals = new string[] {
-                    "vfx_eikthyr_lightning",
-                    "vfx_lightning",
-                    "vfx_eikthyr_stomp"
-                };
-
-                foreach (string fxName in safeVisuals)
-                {
-                    GameObject fxPrefab = ZNetScene.instance.GetPrefab(fxName);
-                    if (fxPrefab != null)
-                    {
-                        GameObject spawned = UnityEngine.Object.Instantiate(fxPrefab, strikePos, Quaternion.identity);
-
-                        // КРИТИЧЕСКИЙ ЗАЩИТНЫЙ ФИЛЬТР: Принудительно удаляем любые боевые компоненты
-                        Aoe[] dangerousAoes = spawned.GetComponentsInChildren<Aoe>(true);
-                        foreach (var aoe in dangerousAoes)
-                        {
-                            if (aoe != null)
-                            {
-                                aoe.m_damage = default; // Обнуляем весь урон
-                                UnityEngine.Object.Destroy(aoe);
-                            }
-                        }
-
-                        // Удаляем любые коллайдеры урона
-                        Collider[] colliders = spawned.GetComponentsInChildren<Collider>(true);
-                        foreach (var col in colliders)
-                        {
-                            if (col != null) UnityEngine.Object.Destroy(col);
-                        }
-
-                        break;
-                    }
-                }
+                GameCamera.instance.AddShake(strikePos, 18f, 1.3f, true);
             }
 
             // 4. Громкий звук удара грома
             AudioSource audio = gameObject.AddComponent<AudioSource>();
-            audio.spatialBlend = 0.7f;
+            audio.spatialBlend = 0.6f;
             audio.minDistance = 6f;
-            audio.maxDistance = 120f;
+            audio.maxDistance = 140f;
             audio.volume = 1f;
 
             AudioClip thunderClip = FindThunderClip();
@@ -458,6 +429,175 @@ namespace ValheimHostPranks
                 }
             }
             return null!;
+        }
+    }
+
+    // =========================================================================
+    // ПРОЦЕДУРНЫЙ 3D-РАЗРЯД МОЛНИИ С ВЕТВЛЕНИЕМ И МЕРЦАНИЕМ (0 УРОНА)
+    // =========================================================================
+    public class ProceduralLightningBolt : MonoBehaviour
+    {
+        private LineRenderer _mainLine = null!;
+        private readonly List<LineRenderer> _branches = new List<LineRenderer>();
+        private Vector3 _startPos;
+        private Vector3 _endPos;
+        private float _timeAlive = 0f;
+        private float _duration = 0.4f; // Длительность видимости разряда
+        private float _flickerTimer = 0f;
+        private const int SegmentCount = 20;
+
+        public void Initialize(Vector3 groundStrikePos)
+        {
+            _endPos = groundStrikePos;
+            // Исходная точка в небесах: 55-60 метров над землей со случайным смещением
+            _startPos = groundStrikePos + Vector3.up * 58f + UnityEngine.Random.insideUnitSphere * 6f;
+            _startPos.y = groundStrikePos.y + 58f;
+
+            // Находим или создаем светящийся шейдер
+            Shader shader = Shader.Find("Particles/Standard Unlit")
+                         ?? Shader.Find("Sprites/Default")
+                         ?? Shader.Find("Unlit/Color");
+            Material boltMaterial = new Material(shader);
+
+            // Основной ствол молнии
+            _mainLine = gameObject.AddComponent<LineRenderer>();
+            _mainLine.material = boltMaterial;
+            _mainLine.startColor = new Color(0.95f, 0.98f, 1.0f, 1.0f);
+            _mainLine.endColor = new Color(0.6f, 0.85f, 1.0f, 1.0f);
+            _mainLine.startWidth = 0.6f;
+            _mainLine.endWidth = 0.35f;
+            _mainLine.positionCount = SegmentCount;
+
+            // 2 боковых ветвления (вилки молнии)
+            for (int i = 0; i < 2; i++)
+            {
+                GameObject branchObj = new GameObject($"Branch_{i}");
+                branchObj.transform.parent = transform;
+                LineRenderer branchLine = branchObj.AddComponent<LineRenderer>();
+                branchLine.material = boltMaterial;
+                branchLine.startColor = new Color(0.7f, 0.9f, 1.0f, 0.9f);
+                branchLine.endColor = new Color(0.4f, 0.7f, 1.0f, 0.0f);
+                branchLine.startWidth = 0.35f;
+                branchLine.endWidth = 0.08f;
+                branchLine.positionCount = 8;
+                _branches.Add(branchLine);
+            }
+
+            // Генерируем первоначальный зигзаг
+            RegenerateBoltGeometry();
+
+            // Создаем искры от удара о землю
+            SpawnGroundSparks(groundStrikePos);
+        }
+
+        private void Update()
+        {
+            _timeAlive += Time.deltaTime;
+            _flickerTimer += Time.deltaTime;
+
+            // Реалистичный стробоскоп/мерцание молнии каждые 0.05 сек
+            if (_flickerTimer >= 0.05f)
+            {
+                _flickerTimer = 0f;
+                RegenerateBoltGeometry();
+            }
+
+            // Затухание толщины к концу жизни
+            float progress = _timeAlive / _duration;
+            float fadeWidth = Mathf.Lerp(1f, 0f, progress * progress);
+            _mainLine.widthMultiplier = fadeWidth;
+            foreach (var b in _branches)
+            {
+                if (b != null) b.widthMultiplier = fadeWidth;
+            }
+
+            if (_timeAlive >= _duration)
+            {
+                Destroy(gameObject);
+            }
+        }
+
+        private void RegenerateBoltGeometry()
+        {
+            // Строим зигзагообразный основной ствол
+            Vector3 diff = _endPos - _startPos;
+            Vector3 sideAxis1 = Vector3.Cross(diff.normalized, Vector3.up).normalized;
+            if (sideAxis1.sqrMagnitude < 0.01f) sideAxis1 = Vector3.right;
+            Vector3 sideAxis2 = Vector3.Cross(diff.normalized, sideAxis1).normalized;
+
+            Vector3[] mainPoints = new Vector3[SegmentCount];
+            mainPoints[0] = _startPos;
+            mainPoints[SegmentCount - 1] = _endPos;
+
+            for (int i = 1; i < SegmentCount - 1; i++)
+            {
+                float t = (float)i / (SegmentCount - 1);
+                Vector3 basePoint = Vector3.Lerp(_startPos, _endPos, t);
+
+                // Случайный излом в стороны
+                float roughness = Mathf.Sin(t * Mathf.PI) * 2.8f;
+                float offset1 = UnityEngine.Random.Range(-roughness, roughness);
+                float offset2 = UnityEngine.Random.Range(-roughness, roughness);
+
+                mainPoints[i] = basePoint + sideAxis1 * offset1 + sideAxis2 * offset2;
+            }
+
+            _mainLine.SetPositions(mainPoints);
+
+            // Строим боковые ветки
+            int branchIdx = 0;
+            foreach (var branch in _branches)
+            {
+                if (branch == null) continue;
+
+                int forkStartIdx = (branchIdx == 0) ? 6 : 12;
+                Vector3 branchStart = mainPoints[Mathf.Clamp(forkStartIdx, 0, SegmentCount - 1)];
+                Vector3 branchDir = (sideAxis1 * (branchIdx == 0 ? 1f : -1f) + Vector3.down * 0.8f + sideAxis2 * UnityEngine.Random.Range(-0.5f, 0.5f)).normalized;
+
+                Vector3[] bPoints = new Vector3[8];
+                bPoints[0] = branchStart;
+                Vector3 currentPos = branchStart;
+
+                for (int j = 1; j < 8; j++)
+                {
+                    currentPos += branchDir * UnityEngine.Random.Range(1.5f, 2.8f) + UnityEngine.Random.insideUnitSphere * 0.8f;
+                    bPoints[j] = currentPos;
+                }
+
+                branch.SetPositions(bPoints);
+                branchIdx++;
+            }
+        }
+
+        private void SpawnGroundSparks(Vector3 groundPos)
+        {
+            // Создаем яркие искры в точке удара о землю
+            GameObject sparkObj = new GameObject("GroundSparks");
+            sparkObj.transform.position = groundPos + Vector3.up * 0.2f;
+
+            ParticleSystem ps = sparkObj.AddComponent<ParticleSystem>();
+            var main = ps.main;
+            main.duration = 0.5f;
+            main.startLifetime = 0.6f;
+            main.startSpeed = 14f;
+            main.startSize = 0.15f;
+            main.startColor = new Color(0.8f, 0.95f, 1f, 1f);
+            main.gravityModifier = 2.5f;
+            main.loop = false;
+
+            var emission = ps.emission;
+            emission.rateOverTime = 0f;
+            emission.SetBursts(new ParticleSystem.Burst[] { new ParticleSystem.Burst(0f, 45) });
+
+            var shape = ps.shape;
+            shape.shapeType = ParticleSystemShapeType.Hemisphere;
+            shape.radius = 0.5f;
+
+            var renderer = sparkObj.GetComponent<ParticleSystemRenderer>();
+            renderer.renderMode = ParticleSystemRenderMode.Billboard;
+
+            ps.Play();
+            Destroy(sparkObj, 1.2f);
         }
     }
 }
