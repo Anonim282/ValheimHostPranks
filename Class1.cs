@@ -1,5 +1,4 @@
 using System;
-using System.Collections;
 using System.Collections.Generic;
 using BepInEx;
 using BepInEx.Configuration;
@@ -12,13 +11,13 @@ namespace ValheimHostPranks
     {
         public const string ModGUID = "com.anonim.valheimhostpranks";
         public const string ModName = "Valheim Host Pranks";
-        public const string ModVersion = "1.0.1";
+        public const string ModVersion = "1.0.2";
 
         public static HostPranksPlugin Instance { get; private set; } = null!;
 
         private ConfigEntry<KeyCode> _toggleKeyConfig = null!;
         private bool _isGuiOpen = false;
-        private Rect _windowRect = new Rect(40, 40, 420, 480);
+        private Rect _windowRect = new Rect(40, 40, 430, 490);
         private Vector2 _scrollPos = Vector2.zero;
         private string _statusMessage = "Готов к пранкам. Выберите игрока.";
         private float _statusTimer = 0f;
@@ -70,7 +69,7 @@ namespace ValheimHostPranks
 
         private void DrawWindow(int windowId)
         {
-            GUI.DragWindow(new Rect(0, 0, 380, 25));
+            GUI.DragWindow(new Rect(0, 0, 390, 25));
 
             GUILayout.Space(5);
             GUILayout.BeginHorizontal();
@@ -91,7 +90,7 @@ namespace ValheimHostPranks
             }
             else
             {
-                _scrollPos = GUILayout.BeginScrollView(_scrollPos, GUILayout.Height(320));
+                _scrollPos = GUILayout.BeginScrollView(_scrollPos, GUILayout.Height(330));
 
                 foreach (Player player in allPlayers)
                 {
@@ -129,14 +128,14 @@ namespace ValheimHostPranks
                 GUILayout.EndScrollView();
             }
 
-            GUILayout.Space(8);
+            GUILayout.Space(6);
             GUILayout.Label($"<color=#E0E0E0>Статус:</color> <color=#FFFF66>{_statusMessage}</color>");
         }
 
         public void SetStatus(string message)
         {
             _statusMessage = message;
-            _statusTimer = 4.5f;
+            _statusTimer = 5f;
             Logger.LogInfo(message);
         }
 
@@ -147,14 +146,13 @@ namespace ValheimHostPranks
         {
             if (target == null) return;
 
-            // Создаем невидимый звуковой эмиттер, кружащийся вокруг головы игрока
             GameObject prankObj = new GameObject("Prank_MosquitoEar");
             prankObj.transform.position = target.transform.position + Vector3.up * 1.6f;
 
             MosquitoEarFollower follower = prankObj.AddComponent<MosquitoEarFollower>();
             follower.TargetPlayer = target;
 
-            SetStatus($"🦟 Комар отправлен жужжать в ухо игроку '{target.GetPlayerName()}'!");
+            SetStatus($"🦟 Комар отправлен жужжать в ухо '{target.GetPlayerName()}'!");
         }
 
         // ==========================================
@@ -164,20 +162,14 @@ namespace ValheimHostPranks
         {
             if (target == null) return;
 
-            if (ZNetScene.instance == null)
-            {
-                SetStatus("Ошибка: ZNetScene недоступен.");
-                return;
-            }
-
-            GameObject odinPrefab = ZNetScene.instance.GetPrefab("Odin");
+            GameObject? odinPrefab = FindOdinPrefab();
             if (odinPrefab == null)
             {
-                SetStatus("Ошибка: Префаб 'Odin' не найден в игре.");
+                SetStatus("Ошибка: Модель Одина не найдена в ресурсах.");
                 return;
             }
 
-            // Позиция спавна: 4.5 метра перед лицом игрока
+            // Позиция спавна: 4.2 метра перед лицом игрока
             Vector3 forward = target.transform.forward;
             forward.y = 0f;
             if (forward.sqrMagnitude < 0.01f) forward = Vector3.forward;
@@ -192,10 +184,11 @@ namespace ValheimHostPranks
 
             Quaternion rot = Quaternion.LookRotation((target.transform.position - spawnPos).normalized);
 
-            // Спавним Одина
+            // Создаем экземпляр Одина
             GameObject odinInstance = UnityEngine.Object.Instantiate(odinPrefab, spawnPos, rot);
+            odinInstance.SetActive(true);
 
-            // Удаляем оригинальный скрипт самоуничтожения Одина, чтобы он не исчезал вблизи
+            // Удаляем оригинальный скрипт самоуничтожения Одина, чтобы он не исчезал при приближении
             Odin vanillaOdin = odinInstance.GetComponent<Odin>();
             EffectList? despawnEffects = null;
             if (vanillaOdin != null)
@@ -204,11 +197,99 @@ namespace ValheimHostPranks
                 UnityEngine.Object.Destroy(vanillaOdin);
             }
 
-            // Навешиваем наш контроллер шоу
+            // Навешиваем контроллер кастомного шоу
             OdinPrankController controller = odinInstance.AddComponent<OdinPrankController>();
             controller.Initialize(target, despawnEffects);
 
-            SetStatus($"⚡ Один явился покарать игрока '{target.GetPlayerName()}'!");
+            SetStatus($"⚡ Один ({odinPrefab.name}) явился покарать '{target.GetPlayerName()}'!");
+        }
+
+        private GameObject? FindOdinPrefab()
+        {
+            // 1. Поиск в ZNetScene
+            if (ZNetScene.instance != null)
+            {
+                var p = ZNetScene.instance.GetPrefab("Odin")
+                     ?? ZNetScene.instance.GetPrefab("odin");
+                if (p != null) return p;
+
+                if (ZNetScene.instance.m_prefabs != null)
+                {
+                    foreach (var go in ZNetScene.instance.m_prefabs)
+                    {
+                        if (go != null)
+                        {
+                            if (go.GetComponent<Odin>() != null || go.name.Equals("Odin", StringComparison.OrdinalIgnoreCase))
+                            {
+                                return go;
+                            }
+                        }
+                    }
+                }
+
+                if (ZNetScene.instance.m_nonNetViewPrefabs != null)
+                {
+                    foreach (var go in ZNetScene.instance.m_nonNetViewPrefabs)
+                    {
+                        if (go != null)
+                        {
+                            if (go.GetComponent<Odin>() != null || go.name.Equals("Odin", StringComparison.OrdinalIgnoreCase))
+                            {
+                                return go;
+                            }
+                        }
+                    }
+                }
+            }
+
+            // 2. Поиск в активных SpawnSystem
+            SpawnSystem[] spawnSystems = UnityEngine.Object.FindObjectsByType<SpawnSystem>(FindObjectsSortMode.None);
+            if (spawnSystems != null)
+            {
+                foreach (var sys in spawnSystems)
+                {
+                    if (sys == null || sys.m_spawnLists == null) continue;
+                    foreach (var spawnList in sys.m_spawnLists)
+                    {
+                        if (spawnList == null || spawnList.m_spawners == null) continue;
+                        foreach (var sp in spawnList.m_spawners)
+                        {
+                            if (sp != null && sp.m_prefab != null)
+                            {
+                                if (sp.m_prefab.GetComponent<Odin>() != null || sp.m_prefab.name.Equals("Odin", StringComparison.OrdinalIgnoreCase))
+                                {
+                                    return sp.m_prefab;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // 3. Поиск по всем загруженным объектам Unity в памяти
+            try
+            {
+                var allOdins = Resources.FindObjectsOfTypeAll<Odin>();
+                if (allOdins != null && allOdins.Length > 0)
+                {
+                    return allOdins[0].gameObject;
+                }
+
+                var allGos = Resources.FindObjectsOfTypeAll<GameObject>();
+                foreach (var go in allGos)
+                {
+                    if (go != null && (go.GetComponent<Odin>() != null || go.name.Equals("Odin", StringComparison.OrdinalIgnoreCase)))
+                    {
+                        return go;
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Logger.LogWarning($"Ошибка при поиске Одина в Resources: {ex.Message}");
+            }
+
+            return null;
         }
     }
 
@@ -220,33 +301,57 @@ namespace ValheimHostPranks
         public Player TargetPlayer = null!;
         private AudioSource _audioSource = null!;
         private float _timeAlive = 0f;
-        private float _duration = 10f; // жужжит 10 секунд
+        private float _duration = 9f; // жужжит 9 секунд
         private float _angle = 0f;
-        private float _flyRadius = 0.7f;
-        private float _targetHeight = 1.65f;
+        private float _flyRadius = 0.65f;
+        private float _targetHeight = 1.62f;
+        private GameObject[]? _gameFlyFxInstances = null;
+        private bool _attackTriggered = false;
 
         private void Start()
         {
+            // 1. Пытаемся задействовать оригинальный непрерывный эффект полета комара из игры
+            GameObject? mosquitoPrefab = null;
+            if (ZNetScene.instance != null)
+            {
+                mosquitoPrefab = ZNetScene.instance.GetPrefab("Deathsquito")
+                              ?? ZNetScene.instance.GetPrefab("deathsquito");
+            }
+
+            if (mosquitoPrefab != null)
+            {
+                Character ch = mosquitoPrefab.GetComponent<Character>();
+                if (ch != null && ch.m_flyingContinuousEffect != null)
+                {
+                    try
+                    {
+                        _gameFlyFxInstances = ch.m_flyingContinuousEffect.Create(transform.position, transform.rotation, transform);
+                    }
+                    catch { }
+                }
+            }
+
+            // 2. Инициализируем 3D AudioSource
             _audioSource = gameObject.AddComponent<AudioSource>();
-            _audioSource.spatialBlend = 1f; // Полный 3D-звук
-            _audioSource.minDistance = 0.5f;
-            _audioSource.maxDistance = 12f;
+            _audioSource.spatialBlend = 1f; // Полное 3D позиционирование
+            _audioSource.minDistance = 0.4f;
+            _audioSource.maxDistance = 8f;
             _audioSource.rolloffMode = AudioRolloffMode.Linear;
             _audioSource.loop = true;
-            _audioSource.volume = 0.9f;
+            _audioSource.volume = 0.85f;
             _audioSource.pitch = 1.0f;
 
-            // Ищем звук комара из префаба Deathsquito
-            AudioClip clip = FindMosquitoClip();
+            // Если непрерывный эффект из игры не воспроизвел аудио, настраиваем AudioSource
+            AudioClip? clip = FindOfficialMosquitoClip(mosquitoPrefab);
             if (clip != null)
             {
                 _audioSource.clip = clip;
                 _audioSource.Play();
             }
-            else
+            else if (_gameFlyFxInstances == null || _gameFlyFxInstances.Length == 0)
             {
-                // Синтезируем высокочастотный звук жужжания если клип из игры не достался
-                _audioSource.clip = GenerateBuzzClip();
+                // Реалистичный зудящий тембр комара (пилообразный зуммер, без сирен и воя!)
+                _audioSource.clip = GenerateRealisticBuzz();
                 _audioSource.Play();
             }
         }
@@ -255,60 +360,91 @@ namespace ValheimHostPranks
         {
             if (TargetPlayer == null || TargetPlayer.gameObject == null)
             {
+                Cleanup();
                 Destroy(gameObject);
                 return;
             }
 
             _timeAlive += Time.deltaTime;
+
+            // На 8-й секунде — внезапный бросок к уху (звук укуса/атаки)
+            if (_timeAlive >= 7.8f && !_attackTriggered)
+            {
+                _attackTriggered = true;
+                PlayAttackSting();
+            }
+
             if (_timeAlive >= _duration)
             {
-                // Затухание и исчезновение
-                _audioSource.volume = Mathf.MoveTowards(_audioSource.volume, 0f, Time.deltaTime * 2f);
-                if (_audioSource.volume <= 0.01f)
+                _audioSource.volume = Mathf.MoveTowards(_audioSource.volume, 0f, Time.deltaTime * 3f);
+                if (_audioSource.volume <= 0.02f)
                 {
+                    Cleanup();
                     Destroy(gameObject);
                     return;
                 }
             }
 
             // Быстрое хаотичное кружение вокруг головы
-            _angle += Time.deltaTime * 7.5f;
-            float pulseRadius = _flyRadius + Mathf.Sin(_timeAlive * 5f) * 0.25f;
-            float heightOffset = Mathf.Sin(_timeAlive * 3.5f) * 0.2f;
+            _angle += Time.deltaTime * 8.5f;
+            float pulseRadius = _flyRadius + Mathf.Sin(_timeAlive * 4.5f) * 0.2f;
+            float heightOffset = Mathf.Sin(_timeAlive * 3.2f) * 0.15f;
 
             Vector3 headPos = TargetPlayer.transform.position + Vector3.up * (_targetHeight + heightOffset);
             Vector3 offset = new Vector3(Mathf.Cos(_angle) * pulseRadius, 0f, Mathf.Sin(_angle) * pulseRadius);
 
             transform.position = headPos + offset;
-
-            // Модуляция высоты звука (эффект Доплера при сближении с ухом)
-            _audioSource.pitch = 1.0f + Mathf.Sin(_timeAlive * 6f) * 0.15f;
         }
 
-        private AudioClip FindMosquitoClip()
+        private void PlayAttackSting()
         {
-            if (ZNetScene.instance == null) return null!;
-            GameObject mosquitoPrefab = ZNetScene.instance.GetPrefab("Deathsquito");
-            if (mosquitoPrefab == null) return null!;
+            // Небольшой всплеск громкости в ухо перед исчезновением
+            _audioSource.pitch = 1.15f;
+            _audioSource.volume = 1f;
 
-            // Проверяем AudioSource на префабе
-            AudioSource[] sources = mosquitoPrefab.GetComponentsInChildren<AudioSource>(true);
-            foreach (var src in sources)
+            // Воспроизводим звук атаки комара если есть
+            if (ZNetScene.instance != null)
             {
-                if (src != null && src.clip != null) return src.clip;
-            }
-
-            // Проверяем EffectList в BaseAI / MonsterAI
-            BaseAI ai = mosquitoPrefab.GetComponent<BaseAI>();
-            if (ai != null && ai.m_idleSound != null && ai.m_idleSound.m_effectPrefabs != null)
-            {
-                foreach (var fx in ai.m_idleSound.m_effectPrefabs)
+                GameObject hitFx = ZNetScene.instance.GetPrefab("vfx_blood");
+                if (hitFx != null)
                 {
-                    if (fx.m_prefab != null)
+                    UnityEngine.Object.Instantiate(hitFx, transform.position, Quaternion.identity);
+                }
+            }
+        }
+
+        private void Cleanup()
+        {
+            if (_gameFlyFxInstances != null)
+            {
+                foreach (var inst in _gameFlyFxInstances)
+                {
+                    if (inst != null) Destroy(inst);
+                }
+                _gameFlyFxInstances = null;
+            }
+        }
+
+        private void OnDestroy()
+        {
+            Cleanup();
+        }
+
+        private AudioClip? FindOfficialMosquitoClip(GameObject? mosquitoPrefab)
+        {
+            if (mosquitoPrefab == null) return null;
+
+            // 1. Ищем в flying continuous effect
+            Character ch = mosquitoPrefab.GetComponent<Character>();
+            if (ch != null && ch.m_flyingContinuousEffect != null && ch.m_flyingContinuousEffect.m_effectPrefabs != null)
+            {
+                foreach (var ep in ch.m_flyingContinuousEffect.m_effectPrefabs)
+                {
+                    if (ep != null && ep.m_prefab != null)
                     {
-                        var fxAudio = fx.m_prefab.GetComponentInChildren<AudioSource>(true);
-                        if (fxAudio != null && fxAudio.clip != null) return fxAudio.clip;
-                        var zsfx = fx.m_prefab.GetComponentInChildren<ZSFX>(true);
+                        var src = ep.m_prefab.GetComponentInChildren<AudioSource>(true);
+                        if (src != null && src.clip != null) return src.clip;
+                        var zsfx = ep.m_prefab.GetComponentInChildren<ZSFX>(true);
                         if (zsfx != null && zsfx.m_audioClips != null && zsfx.m_audioClips.Length > 0)
                         {
                             return zsfx.m_audioClips[0];
@@ -317,27 +453,60 @@ namespace ValheimHostPranks
                 }
             }
 
-            return null!;
+            // 2. Ищем в MonsterAI idle
+            BaseAI ai = mosquitoPrefab.GetComponent<BaseAI>();
+            if (ai != null && ai.m_idleSound != null && ai.m_idleSound.m_effectPrefabs != null)
+            {
+                foreach (var ep in ai.m_idleSound.m_effectPrefabs)
+                {
+                    if (ep != null && ep.m_prefab != null)
+                    {
+                        var src = ep.m_prefab.GetComponentInChildren<AudioSource>(true);
+                        if (src != null && src.clip != null) return src.clip;
+                        var zsfx = ep.m_prefab.GetComponentInChildren<ZSFX>(true);
+                        if (zsfx != null && zsfx.m_audioClips != null && zsfx.m_audioClips.Length > 0)
+                        {
+                            return zsfx.m_audioClips[0];
+                        }
+                    }
+                }
+            }
+
+            // 3. Ищем во всех дочерних AudioSource
+            AudioSource[] sources = mosquitoPrefab.GetComponentsInChildren<AudioSource>(true);
+            foreach (var s in sources)
+            {
+                if (s != null && s.clip != null) return s.clip;
+            }
+
+            return null;
         }
 
-        private AudioClip GenerateBuzzClip()
+        private AudioClip GenerateRealisticBuzz()
         {
-            // Процедурный зуммер на 450-500 Гц (частота взмахов крыльев комара)
+            // Синтез настоящего комариного зуда (пилообразная волна 430 Гц с обертонами и шумом крыльев)
             int sampleRate = 44100;
-            float freq = 480f;
-            int samples = sampleRate / 2; // 0.5 сек циклический
+            float freq = 430f;
+            int samples = sampleRate / 2; // 0.5 сек циклический буфер
             float[] data = new float[samples];
+            System.Random rand = new System.Random(12345);
+
             for (int i = 0; i < samples; i++)
             {
                 float t = (float)i / sampleRate;
-                // Основной тон + обертоны для характерного писклявого тембра
-                float sample = Mathf.Sin(2 * Mathf.PI * freq * t) * 0.6f
-                             + Mathf.Sin(2 * Mathf.PI * freq * 2f * t) * 0.25f
-                             + Mathf.Sin(2 * Mathf.PI * freq * 3f * t) * 0.15f;
-                data[i] = sample * 0.4f;
+                // Пила (sawtooth) дает характерный жужжащий укус звука
+                float saw1 = ((t * freq) % 1.0f) * 2f - 1f;
+                float saw2 = ((t * freq * 2f) % 1.0f) * 2f - 1f;
+                float saw3 = ((t * freq * 3f) % 1.0f) * 2f - 1f;
+
+                float buzz = saw1 * 0.45f + saw2 * 0.25f + saw3 * 0.15f;
+                // Легкий шум воздуха от взмахов крыльев
+                float wingNoise = (float)(rand.NextDouble() * 0.08 - 0.04);
+
+                data[i] = (buzz + wingNoise) * 0.35f;
             }
 
-            AudioClip clip = AudioClip.Create("ProceduralMosquitoBuzz", samples, 1, sampleRate, false);
+            AudioClip clip = AudioClip.Create("MosquitoBuzzSharp", samples, 1, sampleRate, false);
             clip.SetData(data, 0);
             return clip;
         }
@@ -397,10 +566,10 @@ namespace ValheimHostPranks
                 // Фаза 1: Короткая вспышка и пауза после удара молнии (0.4 сек)
                 if (_lightningLight != null)
                 {
-                    _lightningLight.intensity = Mathf.MoveTowards(_lightningLight.intensity, 0f, Time.deltaTime * 18f);
+                    _lightningLight.intensity = Mathf.MoveTowards(_lightningLight.intensity, 0f, Time.deltaTime * 20f);
                 }
 
-                if (_stateTimer >= 0.45f)
+                if (_stateTimer >= 0.4f)
                 {
                     _phase = 2;
                     _stateTimer = 0f;
@@ -413,7 +582,7 @@ namespace ValheimHostPranks
                 _flightSpeed += Time.deltaTime * 45f;
                 transform.position += _flightDirection * _flightSpeed * Time.deltaTime;
 
-                // Наклоняем Одина немного назад/вверх в полете
+                // Наклоняем силуэт немного назад в полете
                 transform.Rotate(Vector3.right, -15f * Time.deltaTime);
 
                 if (_stateTimer >= 2.8f || transform.position.y > 100f)
@@ -438,7 +607,7 @@ namespace ValheimHostPranks
             lightObj.transform.position = strikePos + Vector3.up * 2f;
             _lightningLight = lightObj.AddComponent<Light>();
             _lightningLight.color = new Color(0.6f, 0.85f, 1.0f);
-            _lightningLight.intensity = 10f;
+            _lightningLight.intensity = 12f;
             _lightningLight.range = 35f;
 
             // 2. Тряска экрана (shockwave)
@@ -476,7 +645,6 @@ namespace ValheimHostPranks
             audio.maxDistance = 100f;
             audio.volume = 1f;
 
-            // Пробуем найти thunder/lightning clip
             AudioClip thunderClip = FindThunderClip();
             if (thunderClip != null)
             {
