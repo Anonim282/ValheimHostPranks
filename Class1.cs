@@ -12,7 +12,7 @@ namespace ValheimHostPranks
     {
         public const string ModGUID = "com.anonim.valheimhostpranks";
         public const string ModName = "Valheim Host Pranks";
-        public const string ModVersion = "1.0.9";
+        public const string ModVersion = "1.1.0";
 
         public static HostPranksPlugin Instance { get; private set; } = null!;
 
@@ -223,6 +223,7 @@ namespace ValheimHostPranks
             }
 
             GameObject directorObj = new GameObject("OdinCinemaDirector");
+            directorObj.transform.position = target.transform.position + Vector3.up * 1.5f;
             OdinCinemaDirector director = directorObj.AddComponent<OdinCinemaDirector>();
             director.StartRitual(target, summonPos, odinPrefab);
 
@@ -385,11 +386,9 @@ namespace ValheimHostPranks
                 _ravens.Add(actor);
             }
 
-            // Звук стаи: полная громкость 1.0f как просил пользователь!
+            // Звук стаи: играем в 2D стерео вокруг игрока на 100% громкости, чтобы карканье отчетливо слышалось отовсюду
             _audio = gameObject.AddComponent<AudioSource>();
-            _audio.spatialBlend = 0.5f;
-            _audio.minDistance = 8f;
-            _audio.maxDistance = 100f;
+            _audio.spatialBlend = 0.0f; // 2D звук - слышен идеально чисто и громко независимо от поворота камеры
             _audio.volume = 1.0f;
 
             PlayCrowSound();
@@ -397,8 +396,12 @@ namespace ValheimHostPranks
 
         private void PlayCrowSound()
         {
-            AudioClip? crowClip = FindAudio("sfx_crow_idle") ?? FindAudio("sfx_bird_flight");
-            if (crowClip != null && _audio != null) _audio.PlayOneShot(crowClip, 1.0f);
+            AudioClip? crowClip = FindCrowAudioClip();
+            if (crowClip != null && _audio != null)
+            {
+                _audio.pitch = UnityEngine.Random.Range(0.92f, 1.08f);
+                _audio.PlayOneShot(crowClip, 1.0f);
+            }
         }
 
         private void Update()
@@ -410,10 +413,14 @@ namespace ValheimHostPranks
                 return;
             }
 
+            // Следуем за игроком, чтобы звук всегда был рядом с ним
+            transform.position = _target.transform.position + Vector3.up * 1.5f;
+
             _timer += Time.deltaTime;
             _audioTimer += Time.deltaTime;
 
-            if (_stage == 0 && _audioTimer >= 3.2f)
+            // Вороны периодически каркают во время кружения (каждые 2.6 сек)
+            if (_stage == 0 && _audioTimer >= 2.6f)
             {
                 _audioTimer = 0f;
                 PlayCrowSound();
@@ -478,18 +485,79 @@ namespace ValheimHostPranks
             _ravens.Clear();
         }
 
-        private AudioClip? FindAudio(string name)
+        private static AudioClip? _cachedGameCrowClip;
+
+        public static AudioClip FindCrowAudioClip()
         {
-            if (ZNetScene.instance == null) return null;
-            GameObject p = ZNetScene.instance.GetPrefab(name);
-            if (p != null)
+            if (_cachedGameCrowClip != null) return _cachedGameCrowClip;
+
+            try
             {
-                var a = p.GetComponentInChildren<AudioSource>(true);
-                if (a != null && a.clip != null) return a.clip;
-                var zsfx = p.GetComponentInChildren<ZSFX>(true);
-                if (zsfx != null && zsfx.m_audioClips != null && zsfx.m_audioClips.Length > 0) return zsfx.m_audioClips[0];
+                // 1. Попробуем префаб ворона
+                if (ZNetScene.instance != null)
+                {
+                    GameObject crow = ZNetScene.instance.GetPrefab("Crow") ?? ZNetScene.instance.GetPrefab("crow");
+                    if (crow != null)
+                    {
+                        var bird = crow.GetComponent<RandomFlyingBird>();
+                        if (bird != null && bird.m_randomNoise != null && bird.m_randomNoise.m_effectPrefabs != null)
+                        {
+                            foreach (var ep in bird.m_randomNoise.m_effectPrefabs)
+                            {
+                                if (ep != null && ep.m_prefab != null)
+                                {
+                                    var zsfx = ep.m_prefab.GetComponentInChildren<ZSFX>(true);
+                                    if (zsfx != null && zsfx.m_audioClips != null && zsfx.m_audioClips.Length > 0 && zsfx.m_audioClips[0] != null)
+                                    {
+                                        _cachedGameCrowClip = zsfx.m_audioClips[0];
+                                        return _cachedGameCrowClip;
+                                    }
+                                    var src = ep.m_prefab.GetComponentInChildren<AudioSource>(true);
+                                    if (src != null && src.clip != null)
+                                    {
+                                        _cachedGameCrowClip = src.clip;
+                                        return _cachedGameCrowClip;
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // 2. Попробуем прямой префаб звука sfx_crow_idle
+                    GameObject sfx = ZNetScene.instance.GetPrefab("sfx_crow_idle");
+                    if (sfx != null)
+                    {
+                        var zsfx = sfx.GetComponentInChildren<ZSFX>(true);
+                        if (zsfx != null && zsfx.m_audioClips != null && zsfx.m_audioClips.Length > 0 && zsfx.m_audioClips[0] != null)
+                        {
+                            _cachedGameCrowClip = zsfx.m_audioClips[0];
+                            return _cachedGameCrowClip;
+                        }
+                        var src = sfx.GetComponentInChildren<AudioSource>(true);
+                        if (src != null && src.clip != null)
+                        {
+                            _cachedGameCrowClip = src.clip;
+                            return _cachedGameCrowClip;
+                        }
+                    }
+                }
+
+                // 3. Поиск среди всех загруженных AudioClip
+                var allClips = Resources.FindObjectsOfTypeAll<AudioClip>();
+                foreach (var clip in allClips)
+                {
+                    if (clip != null && (clip.name.IndexOf("crow", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                                         clip.name.IndexOf("raven", StringComparison.OrdinalIgnoreCase) >= 0))
+                    {
+                        _cachedGameCrowClip = clip;
+                        return _cachedGameCrowClip;
+                    }
+                }
             }
-            return null;
+            catch { }
+
+            // 4. Безотказный синтезатор реалистичного карканья вороны (100% гарантия звука!)
+            return SoundSynthesizer.GetCrowCawClip();
         }
     }
 
@@ -822,6 +890,41 @@ namespace ValheimHostPranks
             _cachedStrikeClip = AudioClip.Create("FullLightningStrike", samples, 1, sampleRate, false);
             _cachedStrikeClip.SetData(data, 0);
             return _cachedStrikeClip;
+        }
+
+        private static AudioClip? _cachedCrowCawClip;
+
+        public static AudioClip GetCrowCawClip()
+        {
+            if (_cachedCrowCawClip != null) return _cachedCrowCawClip;
+
+            int sampleRate = 44100;
+            float duration = 0.55f;
+            int samples = (int)(sampleRate * duration);
+            float[] data = new float[samples];
+            System.Random rand = new System.Random(42);
+
+            for (int i = 0; i < samples; i++)
+            {
+                float t = (float)i / sampleRate;
+                float progress = t / duration;
+
+                // Характерное воронье карканье: две основные хриплые форманты ~520Hz и ~1040Hz с амплитудной модуляцией (хрипотцой 45Hz)
+                float baseFreq = Mathf.Lerp(620f, 480f, progress);
+                float envelope = Mathf.Sin(progress * Mathf.PI);
+                envelope = envelope * envelope; // плавная огибающая
+
+                float caw1 = Mathf.Sin(2f * Mathf.PI * baseFreq * t);
+                float caw2 = Mathf.Sin(2f * Mathf.PI * (baseFreq * 1.95f) * t) * 0.6f;
+                float rasp = Mathf.Sin(2f * Mathf.PI * 48f * t) * 0.5f + 0.5f; // хриплый горловой тон
+                float noise = (float)(rand.NextDouble() * 2.0 - 1.0) * 0.25f;
+
+                data[i] = Mathf.Clamp((caw1 + caw2 + noise) * rasp * envelope * 0.85f, -1f, 1f);
+            }
+
+            _cachedCrowCawClip = AudioClip.Create("ProceduralCrowCaw", samples, 1, sampleRate, false);
+            _cachedCrowCawClip.SetData(data, 0);
+            return _cachedCrowCawClip;
         }
     }
 
